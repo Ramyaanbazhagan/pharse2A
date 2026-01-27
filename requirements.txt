@@ -1,4 +1,6 @@
-pharse2/
-│── main.py
-│── dataset.json
-│── requirements.txt
+streamlit
+google-generativeai
+sentence-transformers
+numpy
+gtts
+torch
