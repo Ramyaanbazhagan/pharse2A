@@ -1,29 +1,36 @@
 import streamlit as st
-import json
+import json, time
 import numpy as np
 from sentence_transformers import SentenceTransformer, util
 import google.generativeai as genai
 from gtts import gTTS
 import tempfile
-import speech_recognition as sr
-import time
 
-# ===============================
+# -------------------------------
 # PAGE CONFIG
-# ===============================
-st.set_page_config(page_title="Neural Persona Call", layout="wide")
+# -------------------------------
+st.set_page_config(page_title="Neural Persona", layout="wide")
 
-# ===============================
-# GEMINI CONFIG
-# ===============================
-try:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-except:
-    genai.configure(api_key="YOUR_API_KEY_HERE")
+# -------------------------------
+# API CONFIG
+# -------------------------------
+genai.configure(api_key="YOUR_GEMINI_KEY")
 
-# ===============================
+# -------------------------------
+# INIT STATES
+# -------------------------------
+if "call_state" not in st.session_state:
+    st.session_state.call_state = "ringing"
+
+if "chat" not in st.session_state:
+    st.session_state.chat = []
+
+if "call_start" not in st.session_state:
+    st.session_state.call_start = None
+
+# -------------------------------
 # LOAD MEMORY
-# ===============================
+# -------------------------------
 @st.cache_resource
 def load_memory():
     with open("dataset.json", "r", encoding="utf-8") as f:
@@ -31,27 +38,23 @@ def load_memory():
 
 memory_data = load_memory()
 
-if "conversations" not in memory_data:
-    memory_data["conversations"] = []
-
-# ===============================
+# -------------------------------
 # FLATTEN MEMORY
-# ===============================
+# -------------------------------
 def flatten_json(data):
-    texts = []
+    out = []
     for k, v in data.items():
         if isinstance(v, list):
-            for item in v:
-                texts.append(str(item))
+            out.extend([str(i) for i in v])
         else:
-            texts.append(str(v))
-    return texts
+            out.append(str(v))
+    return out
 
 memory_texts = flatten_json(memory_data)
 
-# ===============================
+# -------------------------------
 # EMBEDDINGS
-# ===============================
+# -------------------------------
 @st.cache_resource
 def load_embeddings():
     model = SentenceTransformer("all-MiniLM-L6-v2")
@@ -60,104 +63,95 @@ def load_embeddings():
 
 model, embeddings = load_embeddings()
 
-def retrieve_context(query, k=3):
-    q_emb = model.encode(query, convert_to_tensor=True)
-    scores = util.pytorch_cos_sim(q_emb, embeddings)[0]
-    idx = np.argsort(-scores.cpu().numpy())[:k]
-    return [memory_texts[i] for i in idx]
+def retrieve_context(query):
+    q = model.encode(query, convert_to_tensor=True)
+    scores = util.pytorch_cos_sim(q, embeddings)[0]
+    top = np.argsort(-scores.cpu().numpy())[:3]
+    return [memory_texts[i] for i in top]
 
-# ===============================
+# -------------------------------
 # EMOTION
-# ===============================
+# -------------------------------
 def detect_emotion(text):
     t = text.lower()
-    if any(w in t for w in ["sad", "miss", "lonely", "cry"]):
-        return "comforting"
-    if any(w in t for w in ["happy", "love", "great"]):
-        return "happy"
-    return "neutral"
+    if any(w in t for w in ["miss", "sad", "lonely"]):
+        return "😢 Sad"
+    if any(w in t for w in ["happy", "love"]):
+        return "😊 Happy"
+    return "😐 Neutral"
 
-# ===============================
-# SPEAK
-# ===============================
+# -------------------------------
+# VOICE (Fallback-safe)
+# -------------------------------
 def speak(text):
-    tts = gTTS(text)
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-    tts.save(tmp.name)
-    st.audio(tmp.name)
+    tts = gTTS(text, lang="en")
+    f = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tts.save(f.name)
+    return f.name
 
-# ===============================
-# LISTEN
-# ===============================
-def listen():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.info("🎤 Listening...")
-        audio = r.listen(source)
-    try:
-        return r.recognize_google(audio)
-    except:
-        return ""
-
-# ===============================
+# -------------------------------
 # UI
+# -------------------------------
+st.title("📞 Neural Persona – AI Call Simulation")
+
 # ===============================
-st.title("📞 Neural Persona – Call Mode")
+# CALL STATES
+# ===============================
+if st.session_state.call_state == "ringing":
+    st.subheader("Incoming Call")
+    st.audio("ring.mp3", autoplay=True)
 
-if "call_active" not in st.session_state:
-    st.session_state.call_active = False
+    col1, col2 = st.columns(2)
+    if col1.button("✅ Accept"):
+        st.session_state.call_state = "connected"
+        st.session_state.call_start = time.time()
+        st.rerun()
 
-if not st.session_state.call_active:
-    if st.button("📞 Call"):
-        st.session_state.call_active = True
-        st.audio("ring.mp3")
-        time.sleep(2)
-        st.audio("ring.mp3")
-        time.sleep(2)
-        st.audio("ring.mp3")
-        time.sleep(1)
-        speak("Hello… I am here. You can talk to me.")
+    if col2.button("❌ Reject"):
+        st.session_state.call_state = "ended"
+        st.rerun()
 
-else:
-    st.success("📞 Call Connected")
+elif st.session_state.call_state == "connected":
+    st.subheader("📞 Call Connected")
+
+    hello = "Hello… I’m here. Talk to me."
+    st.audio(speak(hello), autoplay=True)
 
     if st.button("🎤 Speak"):
-        user_text = listen()
+        st.session_state.call_state = "talking"
+        st.rerun()
 
-        if user_text:
-            st.write("🧍 You:", user_text)
+elif st.session_state.call_state == "talking":
+    elapsed = int(time.time() - st.session_state.call_start)
+    st.info(f"⏱ Call Duration: {elapsed} sec")
 
-            context = retrieve_context(user_text)
-            context_text = "\n".join(context)
+    user_text = st.text_input("You:")
 
-            prompt = f"""
-You are a synthetic AI companion.
-Speak naturally like a human in a phone call.
-Never claim to be human.
-
-Memory:
-{context_text}
-
+    if st.button("Send Voice/Text"):
+        ctx = retrieve_context(user_text)
+        prompt = f"""
+You are a comforting AI persona.
+Context: {ctx}
 User: {user_text}
 AI:
 """
+        response = genai.GenerativeModel(
+            "models/gemini-2.5-flash"
+        ).generate_content(prompt)
 
-            response = genai.GenerativeModel(
-                "models/gemini-2.5-flash"
-            ).generate_content(prompt)
+        ai_text = response.text
+        emotion = detect_emotion(ai_text)
 
-            ai_text = response.text.strip()
-            st.write("🤖 AI:", ai_text)
-            speak(ai_text)
+        st.session_state.chat.append(("You", user_text))
+        st.session_state.chat.append(("AI", ai_text))
 
-            memory_data["conversations"].append({
-                "user": user_text,
-                "ai": ai_text
-            })
-
-            with open("dataset.json", "w", encoding="utf-8") as f:
-                json.dump(memory_data, f, indent=2)
+        st.markdown(f"**AI ({emotion}):** {ai_text}")
+        st.audio(speak(ai_text), autoplay=True)
 
     if st.button("❌ End Call"):
-        st.session_state.call_active = False
-        st.warning("Call Ended")
+        st.session_state.call_state = "ended"
+        st.rerun()
+
+elif st.session_state.call_state == "ended":
+    st.subheader("📴 Call Ended")
+    st.write("Conversation Saved.")
