@@ -4,5 +4,3 @@ sentence-transformers
 torch
 numpy
 gtts
-SpeechRecognition
-pydub
