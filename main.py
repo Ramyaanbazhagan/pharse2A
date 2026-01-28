@@ -17,7 +17,8 @@ st.set_page_config(
 # -------------------------------
 # GEMINI API CONFIG (CORRECT)
 # -------------------------------
-genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+genai.configure(api_key="AIzaSyBR3OAtNM0GWgNwsrgEX6TJYo34WfIjDn8")
+
 
 # -------------------------------
 # LOAD MEMORY
