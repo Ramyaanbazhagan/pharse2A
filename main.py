@@ -149,7 +149,7 @@ AI:
 """
 
         response = genai.GenerativeModel(
-            "models/gemini-2.5-flash"
+            "models/gemini-1.5-flash"
         ).generate_content(prompt)
 
         ai_text = response.text.strip()
